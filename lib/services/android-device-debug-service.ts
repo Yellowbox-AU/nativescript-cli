@@ -150,7 +150,15 @@ export class AndroidDeviceDebugService
 			return result;
 		}
 
+		// validateRunningApp uses a stupid method of looking running "cat /proc/net/unix" that
+		// returns an empty result even when the app has actually started when called too quickly
+		// after the app is launched (even though the cli has just used the adb shell "ps" command
+		// to determine that the app is running and get its pid to setup logcat). TODO: verify the
+		// app is running by checking for the presence of a global or injected value containing the
+		// PID that is collected in order to setup logcat
+
 		await this.validateRunningApp(this.deviceIdentifier, appId);
+
 		if (debugOptions.debugBrk) {
 			await this.waitForDebugServer(appId);
 		}
@@ -171,15 +179,24 @@ export class AndroidDeviceDebugService
 	}
 
 	// TODO: extract this logic outside the debug service
+	/** Note this method not only confirms the app is running (which could be done via 'adb shell
+	 * ps') but ensures that the NEW inspector socket is ready for connections. Waiting for this
+	 * during an app refresh (nb in debugCore()) when Devtools was already open prevents prematurely
+	 * reloading the Devtools window in getChromeDebugUrl in which case it connects to the old web
+	 * socket which immediately closes leaving the app launch hanging when --debug-brk is used */
 	private async validateRunningApp(
 		deviceId: string,
 		packageName: string
 	): Promise<void> {
-		if (!(await this.isAppRunning(packageName, deviceId))) {
-			this.$errors.fail(
-				`The application ${packageName} does not appear to be running on ${deviceId} or is not built with debugging enabled. Try starting the application manually.`
-			);
+		const MAX_TIME_SEC = 2
+		let tStart = Date.now()
+		while (!(await this.isAppRunning(packageName, deviceId))) {
+			if (Date.now() - tStart > MAX_TIME_SEC * 1000)
+				this.$errors.fail(
+					`The application ${packageName} does not appear to be running on ${deviceId} after ${MAX_TIME_SEC} seconds or is not built with debugging enabled. Try starting the application manually.`
+				);
 		}
+		console.log(`validateRunningApp confirmed app is running in ${Date.now() - tStart} ms`)
 	}
 
 	private async waitForDebugServer(appId: String): Promise<void> {

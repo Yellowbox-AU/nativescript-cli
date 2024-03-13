@@ -1,3 +1,4 @@
+
 import { HmrConstants, DeviceDiscoveryEventNames } from "../common/constants";
 import {
 	PREPARE_READY_EVENT_NAME,
@@ -8,10 +9,11 @@ import {
 } from "../constants";
 import { cache, performanceLog } from "../common/decorators";
 import { EventEmitter } from "events";
+import * as path from 'path'
 import * as util from "util";
 import * as _ from "lodash";
 import { IProjectDataService, IProjectData } from "../definitions/project";
-import { IBuildController } from "../definitions/build";
+import { IBuildArtefactsService, IBuildController } from "../definitions/build";
 import { IPlatformsDataService } from "../definitions/platform";
 import { IDebugController } from "../definitions/debug";
 import { IPluginsService } from "../definitions/plugins";
@@ -23,6 +25,8 @@ import {
 } from "../common/declarations";
 import { IInjector } from "../common/definitions/yok";
 import { injector } from "../common/yok";
+import { sleep } from "../common/helpers";
+import { IDebugInformation } from "../declarations"
 
 export class RunController extends EventEmitter implements IRunController {
 	private prepareReadyEventHandler: any = null;
@@ -43,11 +47,14 @@ export class RunController extends EventEmitter implements IRunController {
 		protected $mobileHelper: Mobile.IMobileHelper,
 		private $platformsDataService: IPlatformsDataService,
 		private $pluginsService: IPluginsService,
-		private $prepareController: IPrepareController,
-		private $prepareDataService: IPrepareDataService,
+		public $prepareController: IPrepareController,
+		public $prepareDataService: IPrepareDataService,
 		private $prepareNativePlatformService: IPrepareNativePlatformService,
 		private $projectChangesService: IProjectChangesService,
-		protected $projectDataService: IProjectDataService
+		protected $projectDataService: IProjectDataService,
+		private $prompter: IPrompter,
+		private $logParserService: ILogParserService,
+		private $buildArtefactsService: IBuildArtefactsService,
 	) {
 		super();
 	}
@@ -237,7 +244,8 @@ export class RunController extends EventEmitter implements IRunController {
 					projectData,
 					liveSyncResultInfo,
 					filesChangeEventData,
-					deviceDescriptor
+					deviceDescriptor,
+					fullSyncAction
 			  )
 			: await this.refreshApplicationWithoutDebug(
 					projectData,
@@ -270,12 +278,95 @@ export class RunController extends EventEmitter implements IRunController {
 		projectData: IProjectData,
 		liveSyncResultInfo: ILiveSyncResultInfo,
 		filesChangeEventData: IFilesChangeEventData,
-		deviceDescriptor: ILiveSyncDeviceDescriptor
+		deviceDescriptor: ILiveSyncDeviceDescriptor,
+		fullSyncAction?: () => Promise<void>
 	): Promise<IRestartApplicationInfo> {
 		const debugOptions = deviceDescriptor.debugOptions || {};
 
 		liveSyncResultInfo.waitForDebugger = !!debugOptions.debugBrk;
 		liveSyncResultInfo.forceRefreshWithSocket = true;
+
+		const { appIdentifier } = liveSyncResultInfo.deviceAppData
+
+		const waitingEnableDebuggingCore: { [appId: string]: Promise<IDebugInformation> } = {}
+
+		if (/ios/i.test(deviceDescriptor.buildData.platform) && !global.lastSeenPort) {
+			// we do not stop the application when debugBrk is false, so we need to attach, instead of launch
+			// if we try to send the launch request, the debugger port will not be printed and the command will timeout
+			debugOptions.start = !debugOptions.debugBrk;
+			// Predict whether app will restart?
+			debugOptions.forceDebuggerAttachedEvent = !/--no-hmr/.test(process.argv.join(''));  // Leads to .emit(DEBUGGER_ATTACHED_EVENT_NAME, debugInformation);
+
+			// let resolveDebugRestartWaiting: Function
+			// This NSLog only happens AFTER the runtime has actually got an attachRequest message,
+			// upon which it initialises its inspector server and will then log "NativeScript
+			// debugger has opened inspector socket on port"
+
+			// This is actually getting triggered BEFORE the cli gets to
+			// refreshApplicationWithDebug() which calls
+			// enableDebuggingCoreWithoutWaitingCurrentAction
+			
+			this.$logParserService.addParseRule({
+				regex: /NativeScript debugger has opened inspector socket on port (\d+?) for (.*)[.]/,
+				handler: async (arg: any) => {
+					// If a devtools frontend is already connected or waiting for a port number
+					// output (e.g. because the window was manually refreshed), ignore this log
+					// message because otherwise our call to enableDebugging... will refresh that
+					// already waiting devtools window which is using the existing websocket and
+					// break everything
+					if (global.frontendWaitingPort) return 
+					const port = +arg[1]
+					global.lastSeenPort = port
+					console.log(`Custom log parser rule got a new port:`, port)
+					// resolveDebugRestartWaiting?.(+arg[1])
+					try {
+						if (waitingEnableDebuggingCore[appIdentifier]) {
+							console.log(`using existing waitingEnableDebuggingCore[${appIdentifier}] promise`)
+							await waitingEnableDebuggingCore[appIdentifier]
+						} else {
+							await (waitingEnableDebuggingCore[appIdentifier] = this.$debugController.enableDebuggingCoreWithoutWaitingCurrentAction(
+								projectData.projectDir,
+								deviceDescriptor.identifier,
+								debugOptions
+							))
+						}
+					} catch (error) {
+						this.$logger.error(`Error enabling debugging`, error)
+					} finally {
+						// If we are still seeing a refresh this means the handler is being awaited before the next one is invoked
+						delete waitingEnableDebuggingCore[appIdentifier]
+					}
+				},
+				name: "debugPortGlobal",
+				platform: 'ios',
+			});
+			// this.$logParserService.addParseRule({
+			// 	regex: /config\.IsDebug = 1/,
+			// 	handler: async (arg: any) => {
+			// 		console.log(`saw the config.isDebug`.yellow)
+			// 		const gotPortFromProm = await Promise.race([
+			// 			new Promise(resolve => resolveDebugRestartWaiting = resolve),
+			// 			sleep(300).then(() => false)
+			// 		])
+			// 		console.log(`gotPortFromProm = ${gotPortFromProm}`.yellow)
+			// 		// We either got the port or the timeout elapsed (in which case getDebugSocket
+			// 		// will send attachRequest to the device and it will open a new inspector port)
+			// 		try {
+			// 			await (waitingEnableDebuggingCore[appIdentifier] = (waitingEnableDebuggingCore[appIdentifier] || this.$debugController.enableDebuggingCoreWithoutWaitingCurrentAction(
+			// 				projectData.projectDir,
+			// 				deviceDescriptor.identifier,
+			// 				debugOptions
+			// 			)))
+			// 		} catch (error) {
+			// 			this.$logger.error(`Error enabling debugging`, error)
+			// 		} finally {
+			// 			delete waitingEnableDebuggingCore[appIdentifier]
+			// 		}
+			// 	},
+			// 	name: "waitDebugStart",
+			// 	platform: 'ios',
+			// });
+		}
 
 		const refreshInfo = await this.refreshApplicationWithoutDebug(
 			projectData,
@@ -285,19 +376,26 @@ export class RunController extends EventEmitter implements IRunController {
 			{
 				shouldSkipEmitLiveSyncNotification: true,
 				shouldCheckDeveloperDiscImage: true,
-			}
+			},
+			fullSyncAction
 		);
 
-		// we do not stop the application when debugBrk is false, so we need to attach, instead of launch
-		// if we try to send the launch request, the debugger port will not be printed and the command will timeout
-		debugOptions.start = !debugOptions.debugBrk;
-		debugOptions.forceDebuggerAttachedEvent = refreshInfo.didRestart;
 
-		await this.$debugController.enableDebuggingCoreWithoutWaitingCurrentAction(
-			projectData.projectDir,
-			deviceDescriptor.identifier,
-			debugOptions
-		);
+		// If we uncomment this on ios we get chrome being launched/refreshed twice every time. On
+		// iOS just use the above log filter which will connect as soon as the log message comes
+		// through every time
+		if (/android/i.test(deviceDescriptor.buildData.platform)) {
+			// we do not stop the application when debugBrk is false, so we need to attach, instead of launch
+			// if we try to send the launch request, the debugger port will not be printed and the command will timeout
+			debugOptions.start = !debugOptions.debugBrk;
+			debugOptions.forceDebuggerAttachedEvent = refreshInfo.didRestart;
+
+			await this.$debugController.enableDebuggingCoreWithoutWaitingCurrentAction(
+				projectData.projectDir,
+				deviceDescriptor.identifier,
+				debugOptions
+			)
+		}
 
 		return refreshInfo;
 	}
@@ -323,7 +421,7 @@ export class RunController extends EventEmitter implements IRunController {
 				filesChangeEventData &&
 				(filesChangeEventData.hasNativeChanges ||
 					!filesChangeEventData.hasOnlyHotUpdateFiles);
-			let shouldRestart = isFullSync;
+			let shouldRestart = isFullSync || filesChangeEventData?.files?.length === 0; // Restart the application if file saved but no changes
 			if (!shouldRestart) {
 				shouldRestart = await platformLiveSyncService.shouldRestart(
 					projectData,
@@ -494,7 +592,7 @@ export class RunController extends EventEmitter implements IRunController {
 				}
 			);
 
-			const prepareResultData = await this.$prepareController.prepare(
+			const prepareResultData: Promise<IPrepareResultData> = global.prepare || this.$prepareController.prepare(
 				prepareData
 			);
 
@@ -529,11 +627,25 @@ export class RunController extends EventEmitter implements IRunController {
 						packageFilePath
 					);
 				} else {
-					const shouldBuild =
-						prepareResultData.hasNativeChanges ||
-						buildData.nativePrepare.forceRebuildNativeApp ||
-						(await this.$buildController.shouldBuild(buildData));
+					let shouldBuild = false;
+					if (packageFilePath = await this.$buildArtefactsService.getLatestAppPackagePath(platformData, buildData).catch(err => '')) {
+						if (process.argv.includes('--nobuild')) {
+							console.log(`--nobuild: ✅ Existing package file: ${path.relative(buildData.projectDir, packageFilePath)}`);
+						} else {
+							// Non-interactive terminal (e.g. vs code integrated terminal) will default to building if --nobuild not specified
+							const reasons = [
+								...await this.$buildController.shouldBuild(buildData) ? ['buildController.shouldBuild detected a build is required'] : [],
+								...(await prepareResultData).hasNativeChanges ? ['prepareResultData.hasNativeChanges true'] : [],
+								...buildData.nativePrepare.forceRebuildNativeApp ? ['forceRebuildNativeApp is true'] : []
+							];
+							shouldBuild = reasons.length && await this.$prompter.confirm(`run-controller believes a build is required for the following reasons:\n\t${reasons.join('\n\t')}\nPerform build?`, () => true);
+						}
+					} else {
+						console.log(`No ipa/apk package found, ignoring --nobuild; project must be built...`);
+						shouldBuild = true;
+					}
 					if (shouldBuild) {
+						await prepareResultData
 						packageFilePath = await deviceDescriptor.buildAction();
 						rebuiltInformation[platformData.platformNameLowerCase] = {
 							isEmulator: device.isEmulator,
@@ -547,7 +659,9 @@ export class RunController extends EventEmitter implements IRunController {
 							projectDir: projectData.projectDir,
 						});
 					}
-
+					// We can install the app on the device while still finishing the prepare step
+					// (webpack build) if there was an app bundle already present, since in the next
+					// step we will do a liveSync to update the JS files the app executes anyway
 					await this.$deviceInstallAppService.installOnDeviceIfNeeded(
 						device,
 						buildData,
@@ -559,6 +673,11 @@ export class RunController extends EventEmitter implements IRunController {
 					this.$liveSyncServiceResolver.resolveLiveSyncService(
 						platformData.platformNameLowerCase
 					);
+				
+				// Again, make sure webpack has finished building just before we transfer all our bundled files
+				await Promise.race([prepareResultData, sleep(1).then(() => true)]).then(log => log === true && console.log(`⏰ 🗂  Waiting for prepareResultData (webpack/prepare)...`))
+				await prepareResultData
+				console.log(`🔄 🗂  Running fullSync (transferring initial files)...`)
 				const { force, useHotModuleReload, skipWatcher } = liveSyncInfo;
 				const liveSyncResultInfo = await platformLiveSyncService.fullSync({
 					force,
@@ -569,6 +688,7 @@ export class RunController extends EventEmitter implements IRunController {
 					liveSyncDeviceData: deviceDescriptor,
 				});
 
+				console.log(`🚀 Running refreshApplication ((re)starting application on device)...`)
 				await this.refreshApplication(
 					projectData,
 					liveSyncResultInfo,
@@ -689,7 +809,16 @@ export class RunController extends EventEmitter implements IRunController {
 					_.merge({ device, watch: true }, watchInfo)
 				);
 
-				if (data.hasNativeChanges) {
+				// Do not try use prompter here to ask the user whether they want to do a rebuild
+				// when --nobuild is not specified. The user won't be able to give a response to the
+				// prompt and the cli will get in a state where it can no longer sync new versions
+				// of the app. Detection of whether a native rebuild is required is not exactly
+				// reliable (e.g. it seems that with Yellowbox maybe due to a plugin build step or
+				// script upon first native build this gets called immediately with
+				// data.hasNativeChanges === true triggering another unnecessary native rebuild). If
+				// a native rebuild is required the developer must jsut do ^c and run the command
+				// again
+				if (/* data.hasNativeChanges */ false) {
 					const rebuiltInfo =
 						rebuiltInformation[platformData.platformNameLowerCase] &&
 						(this.$mobileHelper.isAndroidPlatform(

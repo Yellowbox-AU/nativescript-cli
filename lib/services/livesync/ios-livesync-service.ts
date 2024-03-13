@@ -70,6 +70,12 @@ export class IOSLiveSyncService
 			return path.join(APP_FOLDER_NAME, path.relative(projectFilesPath, res));
 		});
 
+		// Wait for webpack build to complete before transferring files to device
+		console.log(`Waiting for global.prepare to finish:`, global.prepare);
+		await global.prepare
+
+		console.log(`Transferring ${filesToTransfer.length} files to ${deviceAppData.deviceSyncZipPath}...`)
+		console.time('ios-livesync-transfer')
 		await device.fileSystem.transferFiles(deviceAppData, [
 			{
 				getLocalPath: () => tempZip,
@@ -78,6 +84,7 @@ export class IOSLiveSyncService
 				deviceProjectRootPath: await deviceAppData.getDeviceProjectRootPath(),
 			},
 		]);
+		console.timeEnd('ios-livesync-transfer')
 
 		await deviceAppData.device.applicationManager.setTransferredAppFiles(
 			filesToTransfer

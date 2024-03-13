@@ -1,11 +1,11 @@
 import * as _ from "lodash";
 import * as queue from "./queue";
-import * as path from "path";
+// import * as path from "path";
 import { hook } from "./helpers";
 import {
 	ICommandDispatcher,
 	ICancellationService,
-	ISysInfo,
+	// ISysInfo,
 	IFutureDispatcher,
 	IQueue,
 	IErrors,
@@ -25,7 +25,7 @@ export class CommandDispatcher implements ICommandDispatcher {
 		private $cancellation: ICancellationService,
 		private $commandsService: ICommandsService,
 		private $staticConfig: Config.IStaticConfig,
-		private $sysInfo: ISysInfo,
+		// private $sysInfo: ISysInfo,
 		private $options: IOptions,
 		private $versionsService: IVersionsService,
 		private $packageManager: IPackageManager,
@@ -37,21 +37,21 @@ export class CommandDispatcher implements ICommandDispatcher {
 			return this.printVersion();
 		}
 
-		if (this.$logger.getLevel() === "TRACE" && !this.$options.json) {
-			// CommandDispatcher is called from external CLI's only, so pass the path to their package.json
-			this.$logger.trace("Collecting system information...");
-			const sysInfo = await this.$sysInfo.getSysInfo({
-				pathToNativeScriptCliPackageJson: path.join(
-					__dirname,
-					"..",
-					"..",
-					"package.json"
-				),
-			});
-			this.$logger.trace("System information:");
-			this.$logger.trace(JSON.stringify(sysInfo, null, 2));
-			this.$logger.trace("Current CLI version: ", this.$staticConfig.version);
-		}
+		// if (this.$logger.getLevel() === "TRACE" && !this.$options.json) {
+		// 	// CommandDispatcher is called from external CLI's only, so pass the path to their package.json
+		// 	this.$logger.trace("Collecting system information...");
+		// 	const sysInfo = await this.$sysInfo.getSysInfo({
+		// 		pathToNativeScriptCliPackageJson: path.join(
+		// 			__dirname,
+		// 			"..",
+		// 			"..",
+		// 			"package.json"
+		// 		),
+		// 	});
+		// 	this.$logger.trace("System information:");
+		// 	this.$logger.trace(JSON.stringify(sysInfo, null, 2));
+		// 	this.$logger.trace("Current CLI version: ", this.$staticConfig.version);
+		// }
 
 		let commandName = this.getCommandName();
 		let commandArguments = this.$options.argv._.slice(1);

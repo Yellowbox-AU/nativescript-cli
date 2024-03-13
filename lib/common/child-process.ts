@@ -10,6 +10,8 @@ import {
 } from "./declarations";
 import { injector } from "./yok";
 
+export type SpawnNonZeroExitCodeError = Error & { result: ISpawnResult }
+
 export class ChildProcess extends EventEmitter implements IChildProcess {
 	constructor(private $logger: ILogger, private $errors: IErrors) {
 		super();
@@ -82,7 +84,7 @@ export class ChildProcess extends EventEmitter implements IChildProcess {
 			const cwd = options?.cwd ?? process.cwd();
 			command = resolve(cwd, command);
 		}
-		this.$logger.trace(
+		this.$logger.info(
 			"spawn: %s %s",
 			command,
 			this.getArgumentsAsQuotedString(args)
@@ -204,7 +206,9 @@ export class ChildProcess extends EventEmitter implements IChildProcess {
 
 						if (!isResolved) {
 							isResolved = true;
-							reject(new Error(errorMessage));
+							const err = new Error(errorMessage) as SpawnNonZeroExitCodeError
+							err.result = result
+							reject(err);
 							clearKillTimer();
 						}
 					}
@@ -233,31 +237,21 @@ export class ChildProcess extends EventEmitter implements IChildProcess {
 		});
 	}
 
+	/** @throws {SpawnNonZeroExitCodeError} Error with `.result` property */
 	public async trySpawnFromCloseEvent(
 		command: string,
 		args: string[],
 		options?: any,
 		spawnFromEventOptions?: ISpawnFromEventOptions
 	): Promise<ISpawnResult> {
-		try {
-			const childProcessResult = await this.spawnFromEvent(
-				command,
-				args,
-				"close",
-				options,
-				spawnFromEventOptions
-			);
-			return childProcessResult;
-		} catch (err) {
-			this.$logger.trace(
-				`Error from trySpawnFromCloseEvent method. More info: ${err}`
-			);
-			return Promise.resolve({
-				stderr: err && err.message ? err.message : err,
-				stdout: null,
-				exitCode: -1,
-			});
-		}
+		const childProcessResult = await this.spawnFromEvent(
+			command,
+			args,
+			"close",
+			options,
+			spawnFromEventOptions
+		);
+		return childProcessResult;
 	}
 
 	public async tryExecuteApplication(

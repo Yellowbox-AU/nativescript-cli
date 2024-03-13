@@ -56,6 +56,7 @@ import { injector } from "../common/yok";
 import { INotConfiguredEnvOptions } from "../common/definitions/commands";
 import { IProjectChangesInfo } from "../definitions/project-changes";
 import { ITempService } from "../definitions/temp-service";
+import chalk = require("chalk")
 
 interface INativeSourceCodeGroup {
 	name: string;
@@ -459,6 +460,7 @@ export class IOSProjectService extends projectServiceBaseLib.PlatformProjectServ
 				)
 			);
 		} else {
+			console.warn(chalk.red(`--for-device not specified. Project is being built for iOS Simulator`))
 			await attachAwaitDetach(
 				constants.BUILD_OUTPUT_EVENT_NAME,
 				this.$childProcess,

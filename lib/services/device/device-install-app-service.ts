@@ -26,6 +26,8 @@ export class DeviceInstallAppService {
 		private $platformsDataService: IPlatformsDataService
 	) {}
 
+	private initialDeviceBuildInfo: IBuildInfo;
+
 	public async installOnDevice(
 		device: Mobile.IDevice,
 		buildData: IBuildData,
@@ -123,7 +125,7 @@ export class DeviceInstallAppService {
 			return true;
 		}
 
-		const deviceBuildInfo: IBuildInfo = await this.$buildInfoFileService.getDeviceBuildInfo(
+		const deviceBuildInfo = this.initialDeviceBuildInfo = this.initialDeviceBuildInfo || await this.$buildInfoFileService.getDeviceBuildInfo(
 			device,
 			projectData
 		);
@@ -132,11 +134,17 @@ export class DeviceInstallAppService {
 			{ ...buildData, buildForDevice: !device.isEmulator }
 		);
 
-		return (
+		const result = (
 			!localBuildInfo ||
 			!deviceBuildInfo ||
 			deviceBuildInfo.buildTime !== localBuildInfo.buildTime
 		);
+		if (this.initialDeviceBuildInfo && this.initialDeviceBuildInfo.buildTime !== localBuildInfo.buildTime) { // i.e. we are about to perform an install
+			// Reset so that after installing again we will get the updated buildInfo
+			this.initialDeviceBuildInfo = undefined
+		}
+
+		return result
 	}
 
 	private async updateHashesOnDevice(data: {

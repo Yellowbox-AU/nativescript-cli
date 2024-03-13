@@ -27,6 +27,19 @@ export class XcodebuildCommandService implements IXcodebuildCommandService {
 
 		const childProcessOptions = { cwd, stdio: stdio || "inherit" };
 
+		// // Unlock keychain first (required for building from ssh client)
+		// try {
+		// 	await this.$childProcess.spawnFromEvent(
+		// 		"security",
+		// 		["unlock-keychain"],
+		// 		"exit",
+		// 		{ cwd, stdio: 'inherit' },
+		// 		{ throwError: false }
+		// 	)
+		// } catch (error) {
+		// 	this.$logger.warn(`Unable to unlock keychain. Error is: ${error.message}`)
+		// }
+
 		try {
 			const commandResult = await this.$childProcess.spawnFromEvent(
 				"xcodebuild",

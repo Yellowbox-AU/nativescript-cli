@@ -37,6 +37,12 @@ class AnalyticsSettingsService implements IAnalyticsSettingsService {
 		);
 	}
 
+	@exported("analyticsSettingsService")
+	public async getPlaygroundInfo(projectDir: string): Promise<IPlaygroundInfo> {
+		return
+		return this.$playgroundService.getPlaygroundInfo(projectDir);
+	}
+
 	public getClientName(): string {
 		return "" + color.cyan.bold(this.$staticConfig.CLIENT_NAME_ALIAS);
 	}

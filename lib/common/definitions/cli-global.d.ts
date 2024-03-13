@@ -4,6 +4,7 @@ declare var _: _.LoDashStatic;
 /**
  * Defines additional properties added to global object from CLI.
  */
+// @ts-ignore
 interface ICliGlobal extends NodeJS.Global {
 	/**
 	 * Lodash instance.

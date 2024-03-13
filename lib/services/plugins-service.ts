@@ -285,33 +285,24 @@ export class PluginsService implements IPluginsService {
 	public async ensureAllDependenciesAreInstalled(
 		projectData: IProjectData
 	): Promise<void> {
-		const packageJsonContent = this.$fs.readJson(
-			this.getPackageJsonFilePath(projectData.projectDir)
-		);
-		const allDependencies = _.keys(packageJsonContent.dependencies).concat(
-			_.keys(packageJsonContent.devDependencies)
-		);
-
-		const notInstalledDependencies = allDependencies
-			.map((dep) => {
-				this.$logger.trace(`Checking if ${dep} is installed...`);
-				const pathToPackage = resolvePackagePath(dep, {
+		const { dependencies, devDependencies } = require(this.getPackageJsonFilePath(projectData.projectDir))
+		const allDeps = Object.keys({ ...dependencies, ...devDependencies })
+		const notInstalledDependencies = allDeps.filter(d => {
+			try {
+				// Some packages use the `exports` field and do not include package.json in their
+				// exports. Others may have "main" entries that point to files that dont exist even
+				// though the package IS installed. As long as we dont get the specific "Cannot find
+				// module" error, assume the package IS installed.
+				return !require.resolve(`${d}/package.json`, {
 					paths: [projectData.projectDir],
-				});
-
-				if (pathToPackage) {
-					// return false if the dependency is installed - we'll filter out boolean values
-					// and end up with an array of dep names that are not installed if we end up
-					// inside the catch block.
-					return false;
-				}
-
-				this.$logger.trace(`${dep} is not installed, or couldn't be found`);
-				return dep;
-			})
-			.filter(Boolean);
+				})
+			} catch (error) {
+				return error.code === 'MODULE_NOT_FOUND'
+			}
+		})
 
 		if (this.$options.force || notInstalledDependencies.length) {
+			console.log(`ensureAllDependenciesAreInstalled: this.$options.force specified or the following project dependencies do not appear to be installed: ${notInstalledDependencies}`)
 			this.$logger.trace(
 				"Npm install will be called from CLI. Force option is: ",
 				this.$options.force,

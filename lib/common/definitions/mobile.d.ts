@@ -136,6 +136,12 @@ declare global {
 			destroyDebugSocket(appId: string): Promise<void>;
 			openDeviceLogStream(options?: IiOSLogStreamOptions): Promise<void>;
 			destroyAllSockets(): Promise<void>;
+			/** **Was protected** Refer to notes in ../../common/mobile/ios/ios-device-base.ts */
+			attachToDebuggerFoundEvent(
+				appId: string,
+				projectName: string,
+				projectDir: string
+			): Promise<void>
 		}
 
 		interface IAndroidDevice extends IDevice {

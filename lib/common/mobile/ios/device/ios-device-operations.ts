@@ -1,6 +1,6 @@
 import { IOSDeviceLib as IOSDeviceLibModule } from "ios-device-lib";
 import { cache } from "../../../decorators";
-import { DEVICE_LOG_EVENT_NAME } from "../../../constants";
+import { CONNECTED_STATUS, DEVICE_LOG_EVENT_NAME } from "../../../constants";
 import * as _ from "lodash";
 import * as assert from "assert";
 import { EventEmitter } from "events";
@@ -10,6 +10,7 @@ import {
 	IDictionary,
 } from "../../../declarations";
 import { injector } from "../../../yok";
+import { exec, execSync } from "child_process"
 
 export class IOSDeviceOperations
 	extends EventEmitter
@@ -83,10 +84,75 @@ export class IOSDeviceOperations
 				return;
 			}
 
+			// The below approach using xcrun devicectl list DOESN'T work because as soon as
+			// ios-device-lib is notified of a new device it tries to startReadingData, gets nothing
+			// and then immediately raises a DeviceLost event, so when the "discover devices"
+			// process is finished and we go to start deploying on the device we get an error that
+			// no such device could be found
+
+			// const results = JSON.parse(execSync(`xcrun devicectl list devices -j - --quiet`).toString()).result.devices as {
+			// 	capabilities: any,
+			// 	connectionProperties: {
+			// 		transportType: 'localNetwork' | 'wired'
+			// 	} & Record<string, any>,
+			// 	deviceProperties: {
+			// 		/** E.g. "ben-iphone-14" */
+			// 		name: string
+			// 		/** E.g. "21A351" */
+			// 		osBuildUpdate: string
+			// 		/** E.g. "17.0.2" */
+			// 		osVersionNumber: string
+			// 	} & Record<string, any>,
+			// 	hardwareProperties: {
+			// 		cpuType: any,
+			// 		/** E.g. "iPhone" */
+			// 		deviceType: string
+			// 		/** E.g. "D73AP" */
+			// 		hardwareModel: string
+			// 		/** E.g. "iPhone 14 Pro" */
+			// 		marketingName: string
+			// 		/** E.g. "iOS" */
+			// 		platform: string
+			// 		/** E.g. "iPhone15,2" */
+			// 		productType: string
+			// 		/** E.g. "physical" */
+			// 		reality: string
+			// 		/** E.g. "F75JQD7956" */
+			// 		serialNumber: string,
+			// 		/** E.g. "00008120-001471302EEB401E" */
+			// 		udid: string
+			// 	} & Record<string, any>,
+			// 	/** E.g. "013916C7-815D-467D-B6E7-034C7D8DE614" */
+			// 	identifier: string
+			// }[]
+			// console.log(`Found ${results.length} devices:`)
+			// console.table(results.map(r => ({
+			// 	name: r.deviceProperties.name,
+			// 	identifier: r.identifier,
+			// 	// udid: r.hardwareProperties.udid,
+			// 	// productType: r.hardwareProperties.productType,
+			// 	marketingName: r.hardwareProperties.marketingName,
+			// 	// deviceType: r.hardwareProperties.deviceType,
+			// 	OS: r.deviceProperties.osVersionNumber,
+			// 	connection: r.connectionProperties.transportType === 'wired' ? 'USB' : 'WiFi'
+			// })))
+			// for (const result of results) {
+			// 	deviceFoundCallback({
+			// 		deviceId: result.identifier,
+			// 		event: 'add',
+			// 		deviceName: result.hardwareProperties.marketingName,
+			// 		productType: result.hardwareProperties.deviceType,
+			// 		productVersion: result.hardwareProperties.productType,
+			// 		status: CONNECTED_STATUS,
+			// 		isUSBConnected: result.connectionProperties.transportType === 'wired' ? 1 : 0,
+			// 		isWiFiConnected: result.connectionProperties.transportType === 'localNetwork' ? 1 : 0
+			// 	})
+			// }
+
+
 			// We need this because we need to make sure that we have devices.
 			await new Promise<void>((resolve, reject) => {
-				let iterationsCount = 0;
-				const maxIterationsCount = 3;
+				const tStart = Date.now()
 
 				const intervalHandle: NodeJS.Timer = setInterval(() => {
 					if (foundDevice && !options.fullDiscovery) {
@@ -94,8 +160,8 @@ export class IOSDeviceOperations
 						return clearInterval(intervalHandle);
 					}
 
-					iterationsCount++;
-					if (iterationsCount >= maxIterationsCount) {
+					if (Date.now() - tStart >= 10000) {
+						console.warn(`startLookingForDevices did not find device after 10 seconds`)
 						clearInterval(intervalHandle);
 						return resolve();
 					}
@@ -234,11 +300,15 @@ export class IOSDeviceOperations
 				`Starting application ${s.appId} on device with identifier: ${s.deviceId}.`
 			);
 		});
-
-		return this.getMultipleResults<IOSDeviceLib.IDeviceResponse>(
-			() => this.deviceLib.start(startArray),
-			errorHandler
-		);
+		const [job] = startArray
+		// --start-stopped should be conditional on the waitForDebugger flag. Without it we miss the
+		// initial console outputs including the one which triggers devtools line output
+		exec(`xcrun devicectl device process launch --device ${job.deviceId} --terminate-existing ${job.appId} waitForDebugger`) //  --start-stopped
+		return
+		// this.getMultipleResults<IOSDeviceLib.IDeviceResponse>(
+		// 	() => this.deviceLib.start(startArray),
+		// 	errorHandler
+		// );
 	}
 
 	public async stop(
@@ -253,10 +323,29 @@ export class IOSDeviceOperations
 			);
 		});
 
-		return this.getMultipleResults<IOSDeviceLib.IDeviceResponse>(
-			() => this.deviceLib.stop(stopArray),
-			errorHandler
-		);
+		return undefined as any // No need to stop on iOS17+, we use terminate-existing flag when starting
+
+		// // Get process ID -     std::string command = "xcrun devicectl device info processes --device " + device_identifier + " --filter \"executable.path == '"+ executable + "'\"";
+		// const [job] = stopArray
+		// // Get info for all processes by capturing json output
+		// const processInfo = JSON.parse(execSync(`xcrun devicectl device info processes --device ${job.deviceId} -j - --quiet`).toString()) as {
+		// 	info: any,
+		// 	result: {
+		// 		deviceIdentifier: "013916C7-815D-467D-B6E7-034C7D8DE614",
+		// 		runningProcesses: {
+		// 			/** E.g. "file:///private/var/containers/Bundle/Application/13DDA128-D657-43D1-A3D8-7D010380AD3B/Yellowbox.app/Yellowbox" */
+		// 			executable: string,
+		// 			processIdentifier: number
+		// 		}[]
+		// 	}
+		// }
+
+		// const appProcess = processInfo.result.runningProcesses.find(p => p.executable.includes(job.appId))
+
+		// return this.getMultipleResults<IOSDeviceLib.IDeviceResponse>(
+		// 	() => this.deviceLib.stop(stopArray),
+		// 	errorHandler
+		// );
 	}
 
 	public dispose(signal?: string): void {

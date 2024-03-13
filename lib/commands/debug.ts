@@ -10,7 +10,6 @@ import {
 	IDebugController,
 	IDebugOptions,
 } from "../definitions/debug";
-import { IMigrateController } from "../definitions/migrate";
 import { ICommandParameter, ICommand } from "../common/definitions/commands";
 import { IErrors, ISysInfo } from "../common/declarations";
 import { ICleanupService } from "../definitions/cleanup-service";
@@ -36,7 +35,8 @@ export class DebugPlatformCommand
 		private $debugDataService: IDebugDataService,
 		private $debugController: IDebugController,
 		private $liveSyncCommandHelper: ILiveSyncCommandHelper,
-		private $migrateController: IMigrateController
+		private $prepareController: IPrepareController,
+		private $prepareDataService: IPrepareDataService
 	) {
 		super(
 			$options,
@@ -48,6 +48,38 @@ export class DebugPlatformCommand
 	}
 
 	public async execute(args: string[]): Promise<void> {
+
+		// Todo:
+		// Get project dir
+		// Get whether native prepare is required (for iOS this probably actually requires the device because we need to know the architecture, iOS ver?)
+		
+		// Make sure the cleanup process has fully spawned and is ready before
+
+		// On MacOS, cleanup-process SHOULD kill the spawned webpack compile/watch process but
+		// for some reason it doesn't work if executeCleanup is run too soon (even in
+		// deviceAction after an await global.prepare, it still manages to survive).
+		if (!this.$options.start) {
+			const prepareData = await this.$prepareDataService.getPrepareData(
+				this.$projectData.projectDir,
+				this.platform,
+				{
+					nativePrepare: {
+						skipNativePrepare: false,
+					},
+					watchNative: this.$options.watch,
+					watch: this.$options.watch,
+					device:	this.$options.device,
+					platform: this.platform,
+					useHotModuleReload: this.$options.hmr,
+					env: this.$options.env,
+					projectDir: this.$projectData.projectDir,
+					buildForDevice: this.$options.forDevice || !this.$options.emulator  // TODO: This should actually check the type of device returned after searching is done e.g. --device 1 might still give an emulator even if --emulator is not specified
+				}
+			);
+			
+			this.$prepareController.prepare(prepareData)
+		}
+		
 		await this.$devicesService.initialize({
 			platform: this.platform,
 			deviceId: this.$options.device,
@@ -60,6 +92,10 @@ export class DebugPlatformCommand
 			onlyDevices: this.$options.forDevice,
 			deviceId: this.$options.device,
 		});
+
+		// if (selectedDeviceForDebug.deviceInfo.platform.toLowerCase() === 'ios' && selectedDeviceForDebug.isOnlyWiFiConnected) {
+		// 	this.$errors.fail(`ns debug with iOS device is not supported over WiFi connection`);
+		// }
 
 		if (this.$options.start) {
 			const debugOptions = <IDebugOptions>_.cloneDeep(this.$options.argv);
@@ -88,13 +124,6 @@ export class DebugPlatformCommand
 	}
 
 	public async canExecute(args: string[]): Promise<boolean> {
-		if (!this.$options.force) {
-			await this.$migrateController.validate({
-				projectDir: this.$projectData.projectDir,
-				platforms: [this.platform],
-			});
-		}
-
 		if (
 			!this.$platformValidationService.isPlatformSupportedForOS(
 				this.platform,

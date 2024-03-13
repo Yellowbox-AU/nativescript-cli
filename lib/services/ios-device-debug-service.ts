@@ -3,7 +3,7 @@ import { ChildProcess } from "child_process";
 import { DebugServiceBase } from "./debug-service-base";
 import {
 	CONNECTION_ERROR_EVENT_NAME,
-	DeviceConnectionType,
+	// DeviceConnectionType,
 } from "../constants";
 const inspectorAppName = "NativeScript Inspector.app";
 const inspectorNpmPackageName = "tns-ios-inspector";
@@ -66,7 +66,7 @@ export class IOSDeviceDebugService
 	}
 
 	public async debugStop(): Promise<void> {
-		this.$appDebugSocketProxyFactory.removeAllProxies();
+		await this.$appDebugSocketProxyFactory.removeAllProxies();
 	}
 
 	private async validateOptions(debugOptions: IDebugOptions) {
@@ -82,25 +82,25 @@ export class IOSDeviceDebugService
 			);
 		}
 
-		await this.validateUSBConnectedDevice();
+		// await this.validateUSBConnectedDevice(); // NOT ANYMORE BITCH
 	}
 
-	private async validateUSBConnectedDevice() {
-		const device = await this.$devicesService.getDevice(this.deviceIdentifier);
-		if (
-			device.deviceInfo.connectionTypes.indexOf(DeviceConnectionType.USB) ===
-				-1 &&
-			device.deviceInfo.connectionTypes.indexOf(DeviceConnectionType.Local) ===
-				-1
-		) {
-			const deviceConnectionTypes = device.deviceInfo.connectionTypes
-				.map((type) => DeviceConnectionType[type])
-				.join(", ");
-			this.$errors.fail(
-				`Debugging application requires a USB or LOCAL connection while the target device "${this.deviceIdentifier}" has connection type "${deviceConnectionTypes}".`
-			);
-		}
-	}
+	// private async validateUSBConnectedDevice() {
+	// 	const device = await this.$devicesService.getDevice(this.deviceIdentifier);
+	// 	if (
+	// 		device.deviceInfo.connectionTypes.indexOf(DeviceConnectionType.USB) ===
+	// 			-1 &&
+	// 		device.deviceInfo.connectionTypes.indexOf(DeviceConnectionType.Local) ===
+	// 			-1
+	// 	) {
+	// 		const deviceConnectionTypes = device.deviceInfo.connectionTypes
+	// 			.map((type) => DeviceConnectionType[type])
+	// 			.join(", ");
+	// 		this.$errors.fail(
+	// 			`Debugging application requires a USB or LOCAL connection while the target device "${this.deviceIdentifier}" has connection type "${deviceConnectionTypes}".`
+	// 		);
+	// 	}
+	// }
 
 	private getProjectName(debugData: IDebugData): string {
 		let projectName = debugData.projectName;
@@ -148,6 +148,16 @@ export class IOSDeviceDebugService
 			);
 		}
 		const projectName = this.getProjectName(debugData);
+		// Create the web socket server for the frontend Chrome DevTools window to connect to
+		// (usually port 41000), which will proxy through messages to/from the v8-inspector
+		// (InspectorServer.mm) server running on the device. The device sends messages back to the
+		// cli via ios-device-lib, which uses USBMuxConnectByPort to mux the TCP data over the USB
+		// connection somehow. There are actually 2 proxy servers involved to get everything
+		// working. One run by ios-device-lib's C++ native layer and the second here in Node JS -
+		// not sure why we couldn't just have the ios-device-lib C++ one (android?) or even just
+		// have the devtools frontend connect directly to the ios device over the network (NS devs
+		// didn't want to force/assume we could always be on the same LAN as the device or it was
+		// going to be tricky to obtain the hostname/IP??)
 		const webSocketProxy = await this.$appDebugSocketProxyFactory.ensureWebSocketProxy(
 			this.device,
 			debugData.applicationIdentifier,

@@ -5,7 +5,6 @@ import * as constants from "../../../../constants";
 import * as net from "net";
 import * as _ from "lodash";
 import { cache } from "../../../decorators";
-import * as helpers from "../../../../common/helpers";
 import { IOSDeviceBase } from "../ios-device-base";
 import { IiOSSocketRequestExecutor } from "../../../../declarations";
 import { IErrors } from "../../../declarations";
@@ -89,38 +88,63 @@ export class IOSDevice extends IOSDeviceBase {
 	@cache()
 	public async openDeviceLogStream(): Promise<void> {
 		if (this.deviceInfo.status !== commonConstants.UNREACHABLE_STATUS) {
-			this._deviceLogHandler = this.actionOnDeviceLog.bind(this);
+			// Wait for ANY log data to come through, since ios-device-lib doesn't do this or have
+			// any other way to confirm logs have started being received. If we dont wait for
+			// something here we will launch the app first and miss the "inspector port" message
+			// that comes through first.
+			const t0 = Date.now()
+			const prom = new Promise<void>((resolve, reject) => {
+				const timerId = setTimeout(() => reject(new Error("Timeout waiting for device log")), 3000);
+				this.$iosDeviceOperations.once(
+					commonConstants.DEVICE_LOG_EVENT_NAME,
+					() => {
+						console.log(`openDeviceLogStream got log data after ${Date.now() - t0}ms`)
+						clearTimeout(timerId);
+						resolve();
+					}
+				);
+			})
+
 			this.$iosDeviceOperations.on(
 				commonConstants.DEVICE_LOG_EVENT_NAME,
-				this._deviceLogHandler
+				this._deviceLogHandler = this.actionOnDeviceLog.bind(this)
 			);
+
 			this.$iosDeviceOperations.startDeviceLog(this.deviceInfo.identifier);
+			return prom;
 		}
 	}
 
 	protected async getDebugSocketCore(appId: string): Promise<net.Socket> {
-		await this.$iOSSocketRequestExecutor.executeAttachRequest(
-			this,
-			constants.AWAIT_NOTIFICATION_TIMEOUT_SECONDS,
-			appId
-		);
-		const port = await super.getDebuggerPort(appId);
+		console.time('connInspectorSocket')
 		const deviceId = this.deviceInfo.identifier;
+		const port = global.lastSeenPort || await (async () => {
+			await this.$iOSSocketRequestExecutor.executeAttachRequest(this, constants.AWAIT_NOTIFICATION_TIMEOUT_SECONDS, appId);
+			console.timeLog('connInspectorSocket', `executeAttachRequest resolved`.green)
+			return await super.getDebuggerPort(appId);
+		})()
+		console.timeLog('connInspectorSocket', `getDebugSocketCore got port = ${port}`)
+		
+		// [when the app is not launched with --debug-brk]: Even when we've picked up the inspector
+		// port and everything the CPU still gets pinned here by the app starting. How long this
+		// takes to return will depend entirely on how long it takes the device to get other work
+		// out of the way.
+		const { port: deviceResponsePort, host: deviceResponseHost } = await this.$iosDeviceOperations.connectToPort([
+			{ deviceId: deviceId, port: port },
+		]).then(arr => arr[deviceId][0])
+		
+		console.timeLog('connInspectorSocket', `getDebugSocketCore got result from connectToPort =`, global.lastSeenPort)
 
-		const socket = await helpers.connectEventuallyUntilTimeout(async () => {
-			const deviceResponse = _.first(
-				(
-					await this.$iosDeviceOperations.connectToPort([
-						{ deviceId: deviceId, port: port },
-					])
-				)[deviceId]
-			);
-			const _socket = new net.Socket();
-			_socket.connect(deviceResponse.port, deviceResponse.host);
-			return _socket;
-		}, commonConstants.SOCKET_CONNECTION_TIMEOUT_MS);
-
-		return socket;
+		return await new Promise((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error(`getDebugSocketCore: Timeout connecting to port ${deviceResponsePort}`)), 3000)
+			new net.Socket().connect(deviceResponsePort, deviceResponseHost, function () {
+				this.removeListener("error", reject);
+				clearTimeout(timer)
+				console.log(`getDebugSocketCore resolving`.green)
+				console.timeEnd('connInspectorSocket')
+				resolve(this)
+			})
+		})
 	}
 
 	private actionOnDeviceLog(response: IOSDeviceLib.IDeviceLogData): void {

@@ -1,5 +1,6 @@
 require("./bootstrap");
 
+import 'source-map-support/register'
 import * as shelljs from "shelljs";
 shelljs.config.silent = true;
 shelljs.config.fatal = true;

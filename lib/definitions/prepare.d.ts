@@ -1,3 +1,4 @@
+import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { IControllerDataBase } from "./data";
 import { IPlatformData } from "./platform";
@@ -51,4 +52,14 @@ declare global {
 			prepareData: IPrepareData
 		): Promise<boolean>;
 	}
+
+	var prepare: Promise<IPrepareResultData>;  // Doesn't work with `const`???
+	var webpackCp: ChildProcess;  // Doesn't work with `const`???
+	/** Whether there is currently a build in progress so we know to ignore chokidar changes
+	 * detected in native directories */
+	var buildInProgress: boolean;
+	
+	var ruleAdded: boolean
+	var lastSeenPort: number
+	var frontendWaitingPort: boolean
 }

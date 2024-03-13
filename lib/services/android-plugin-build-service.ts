@@ -38,6 +38,7 @@ import { injector } from "../common/yok";
 import * as _ from "lodash";
 import { resolvePackageJSONPath } from "@rigor789/resolve-package-path";
 import { cwd } from "process";
+import { chmod } from "shelljs";
 
 export class AndroidPluginBuildService implements IAndroidPluginBuildService {
 	private get $platformsDataService(): IPlatformsDataService {
@@ -841,6 +842,12 @@ export class AndroidPluginBuildService implements IAndroidPluginBuildService {
 		}
 
 		try {
+			// Ensure gradlew is executable on unix. Fixes EACCESS crash building ble plugin for
+			// android on MacOS because gradlew is not executable
+			if (!this.$hostInfo.isWindows) {
+				chmod('+x', pluginBuildSettings.pluginDir + '/' + gradlew)
+			}
+
 			const sanitizedArgs = this.$hostInfo.isWindows
 				? localArgs.map((arg) => quoteString(arg))
 				: localArgs;

@@ -3,7 +3,7 @@ import { injector } from "../common/yok";
 export class IOSLogFilter implements Mobile.IPlatformLogFilter {
 	// Used to recognize output related to the current project
 	// This looks for artifacts like: AppName[22432] or AppName(SomeTextHere)[23123]
-	private appOutputRegex: RegExp = /([^\s\(\)]+)(?:\(([^\s]+)\))?\[[0-9]+\]/;
+	private appOutputRegex: RegExp = /([^\s\(\)]+)(?:\(([^\s]+)\))?\[[0-9]+\](.+)/;
 
 	// Used to trim the passed messages to a simpler output
 	// Example:
@@ -41,6 +41,7 @@ export class IOSLogFilter implements Mobile.IPlatformLogFilter {
 		const skipLastLine =
 			chunkLines.length > 0 ? data[data.length - 1] !== "\n" : false;
 		let output = "";
+		const projectName = loggingOptions && loggingOptions.projectName;
 		for (let i = 0; i < chunkLines.length; i++) {
 			let currentLine = chunkLines[i];
 
@@ -60,17 +61,14 @@ export class IOSLogFilter implements Mobile.IPlatformLogFilter {
 			}
 
 			const matchResult = this.appOutputRegex.exec(currentLine);
-
 			if (matchResult && matchResult.length > 1) {
 				// Check if the name of the app equals the name of the CLI project and turn on the filter if not.
 				// We call initializeProjectData in order to obtain the current project name as the instance
 				// of this filter may be used accross multiple projects.
-				const projectName = loggingOptions && loggingOptions.projectName;
-				this.filterActive = matchResult[1] !== projectName;
-
-				if (matchResult?.[2]) {
-					this.filterActive ||= matchResult[2] !== "NativeScript";
-				}
+				
+				// Set this to false to show all logs
+				this.filterActive = (matchResult[1] !== projectName  // Log is not from process === yellowbox
+					|| (matchResult[2] !== projectName && matchResult[2] !== 'NativeScript'))  // Library is not Yellowbox or NativeScript
 			}
 
 			if (this.filterActive) {

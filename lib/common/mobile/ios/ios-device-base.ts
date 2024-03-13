@@ -30,14 +30,22 @@ export abstract class IOSDeviceBase implements Mobile.IiOSDevice {
 				return this.cachedSockets[appId];
 			}
 
+			// This just ensures there are log filters set up in ios-debugger-port-service so that
+			// when the port IS emitted we capture it and store it in the ios-debugger-port-service
+			// instance for getDebugSocketCore to access at the next step. We still need to set this
+			// up incase we refresh the devtools window in which case we need to send another
+			// attachRequest to get another port number, which relies on having this filter setup
+
 			await this.attachToDebuggerFoundEvent(appId, projectName, projectDir);
+
 			try {
 				if (ensureAppStarted) {
-					await this.applicationManager.startApplication({
-						appId,
-						projectName,
-						projectDir,
-					});
+					console.log(`ios-device-base.ts: Skipping ensureAppStarted -> startApplication()...`.yellow)
+					// await this.applicationManager.startApplication({
+					// 	appId,
+					// 	projectName,
+					// 	projectDir,
+					// });
 				}
 			} catch (err) {
 				this.$logger.trace(
@@ -61,7 +69,10 @@ export abstract class IOSDeviceBase implements Mobile.IiOSDevice {
 		appId: string
 	): Promise<net.Socket>;
 
-	protected async attachToDebuggerFoundEvent(
+	// Need to expose this to app-debug-socket-proxy-factory.ts for when --start is used so it can
+	// get a new debugger port without going via getDebugSocket which will cause ios-device-lib to
+	// bind to the socket first preventing us from making a LAN connection
+	async attachToDebuggerFoundEvent(
 		appId: string,
 		projectName: string,
 		projectDir: string
@@ -118,7 +129,6 @@ export abstract class IOSDeviceBase implements Mobile.IiOSDevice {
 				projectDir
 			);
 		}
-
 		await this.openDeviceLogStream();
 	}
 }

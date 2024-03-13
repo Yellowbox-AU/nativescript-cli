@@ -78,6 +78,9 @@ export class PrepareController extends EventEmitter {
 	}
 
 	public async prepare(prepareData: IPrepareData): Promise<IPrepareResultData> {
+		if (global.prepare)
+			console.warn(`prepare-controller.ts: prepare() called while there is still a global.prepare`.red)
+		global.prepare = (async () => {
 		const projectData = this.$projectDataService.getProjectData(
 			prepareData.projectDir
 		);
@@ -90,6 +93,9 @@ export class PrepareController extends EventEmitter {
 		await this.$pluginsService.ensureAllDependenciesAreInstalled(projectData);
 
 		return this.prepareCore(prepareData, projectData);
+		})()
+		global.prepare.finally(() => global.prepare = undefined)
+		return await global.prepare
 	}
 
 	public async stopWatchers(
@@ -367,7 +373,9 @@ export class PrepareController extends EventEmitter {
 			.on("all", async (event: string, filePath: string) => {
 				if (this.isFileWatcherPaused()) return;
 				filePath = path.join(projectData.projectDir, filePath);
-				if (this.$watchIgnoreListService.isFileInIgnoreList(filePath)) {
+				if (global.buildInProgress) {
+					this.$logger.info(`Chokidar native watcher ignoring event ${event} for ${filePath} as there is currently a native build in progress.`);
+				} else if (this.$watchIgnoreListService.isFileInIgnoreList(filePath)) {
 					this.$watchIgnoreListService.removeFileFromIgnoreList(filePath);
 				} else {
 					this.$logger.info(`Chokidar raised event ${event} for ${filePath}.`);

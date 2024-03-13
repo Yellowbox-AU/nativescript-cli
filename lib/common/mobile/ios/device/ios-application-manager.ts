@@ -143,7 +143,18 @@ export class IOSApplicationManager extends ApplicationManagerBase {
 	): Promise<void> {
 		try {
 			await this.setDeviceLogData(appData);
-			await this.stopApplication(appData);
+			
+			// THIS is the whole reason for the double restart (and as a result the fuckery with
+			// devtools frontend/ports) every time we start the app. For some reason when
+			// ios-device-lib gets told to "stop" the app, as a result of which it sends the kill
+			// "k" request packet
+			// (https://github.com/NativeScript/ios-device-lib/blob/78e3e1ffac3fb5e62cb3a47187a4a5f714741814/IOSDeviceLib/GDBHelper.cpp#L130,
+			// we can see a log or two mentioning this "k" come up in Console.app), the app actually
+			// (re)starts for some reason... Sending the "start" request causes it to restart if it
+			// was already running anyway 🤷‍♂️
+
+			// await this.stopApplication(appData);
+
 			await this.runApplicationCore(appData);
 		} catch (err) {
 			await this.$iOSNotificationService.postNotification(
@@ -174,6 +185,12 @@ export class IOSApplicationManager extends ApplicationManagerBase {
 		appData: Mobile.IStartApplicationData
 	): Promise<void> {
 		const waitForDebugger = (!!appData.waitForDebugger).toString();
+		console.log(`runApplicationCore calling $iosDeviceOperations.start with`, {
+			deviceId: this.device.deviceInfo.identifier,
+			appId: appData.appId,
+			ddi: this.$options.ddi,
+			waitForDebugger
+		})
 		await this.$iosDeviceOperations.start([
 			{
 				deviceId: this.device.deviceInfo.identifier,

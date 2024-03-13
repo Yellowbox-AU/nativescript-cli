@@ -19,7 +19,7 @@ export class LogParserService
 
 	public addParseRule(rule: ILogParseRule): void {
 		if (this.parseRules[rule.name]) {
-			this.$errors.fail("Log parse rule already exists.");
+			console.warn(`Log parse rule ${rule.name} regex ${rule.regex} already exists.`);
 		}
 
 		this.parseRules[rule.name] = rule;

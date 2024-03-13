@@ -2,7 +2,7 @@ import { performanceLog } from "../common/decorators";
 import { EOL } from "os";
 import { parse } from "url";
 import * as _ from "lodash";
-import { CONNECTED_STATUS } from "../common/constants";
+// import { CONNECTED_STATUS } from "../common/constants";
 import {
 	TrackActionNames,
 	DebugCommandErrors,
@@ -30,6 +30,7 @@ import {
 import { IInjector } from "../common/definitions/yok";
 import { injector } from "../common/yok";
 import { color } from "../color";
+import { IOSDeviceDebugService } from "../services/ios-device-debug-service"
 
 export class DebugController extends EventEmitter implements IDebugController {
 	private _platformDebugServices: IDictionary<IDeviceDebugService> = {};
@@ -61,12 +62,6 @@ export class DebugController extends EventEmitter implements IDebugController {
 			);
 		}
 
-		if (device.deviceInfo.status !== CONNECTED_STATUS) {
-			this.$errors.fail(
-				`The device with identifier ${debugData.deviceIdentifier} is unreachable. Make sure it is Trusted and try again.`
-			);
-		}
-
 		await this.$analyticsService.trackEventActionInGoogleAnalytics({
 			action: TrackActionNames.Debug,
 			device,
@@ -79,17 +74,23 @@ export class DebugController extends EventEmitter implements IDebugController {
 			projectDir: debugData.projectDir,
 		});
 
-		if (
-			!(await device.applicationManager.isApplicationInstalled(
-				debugData.applicationIdentifier
-			))
-		) {
-			this.$errors.fail(
-				`The application ${debugData.applicationIdentifier} is not installed on device with identifier ${debugData.deviceIdentifier}.`
-			);
-		}
+		// THIS CHECK TOOK 4000MS ON IOS ON INITIAL APP LAUNCH (2022-04-03)
+		
+		// Commenting it though means we connect too quickly to the websocket proxy if devtools is
+		// already open, before the app restarts and opens a new port
+		
+		// if (
+		// 	!(await device.applicationManager.isApplicationInstalled(
+		// 		debugData.applicationIdentifier
+		// 	))
+		// ) {
+		// 	this.$errors.fail(
+		// 		`The application ${debugData.applicationIdentifier} is not installed on device with identifier ${debugData.deviceIdentifier}.`
+		// 	);
+		// }
 
-		const debugService = this.getDeviceDebugService(device);
+		// @ts-ignore calls wireDebuggerClient -> setupWebAppDebugProxy() -> { ensureWebSocketProxy() => getChromeDebugUrl(opts, port) }
+		const debugService: IOSDeviceDebugService = this.getDeviceDebugService(device);
 		if (!debugService) {
 			this.$errors.fail(
 				`Unsupported device OS: ${device.deviceInfo.platform}. You can debug your applications only on iOS or Android.`

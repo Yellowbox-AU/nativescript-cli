@@ -264,6 +264,15 @@ export class ITMSTransporterService implements IITMSTransporterService {
 				"bin",
 				ITMSConstants.iTMSExecutableName
 			);
+		} else if (+xcodeVersionData.major >= 14) {
+			itmsTransporterPath = path.join(
+				"/Applications",
+				"Transporter.app",
+				"Contents",
+				"itms",
+				"bin",
+				ITMSConstants.iTMSExecutableName
+			)
 		}
 
 		return itmsTransporterPath;

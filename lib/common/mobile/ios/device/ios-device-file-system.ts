@@ -1,6 +1,8 @@
 import { EOL } from "os";
 import * as _ from "lodash";
 import { IFileSystem, IStringDictionary } from "../../../declarations";
+import { spawn } from "child_process"
+import path = require("path")
 
 export class IOSDeviceFileSystem implements Mobile.IDeviceFileSystem {
 	private static AFC_DELETE_FILE_NOT_FOUND_ERROR = 8;
@@ -122,14 +124,63 @@ export class IOSDeviceFileSystem implements Mobile.IDeviceFileSystem {
 			source: l.getLocalPath(),
 			destination: l.getDevicePath(),
 		}));
+		console.time('transferFiles')
+		
+		// OPTIMISATION:
+		// - Call another method prepareForTransferFiles upon rebuild started, or even upon CLI
+		//   launch. This method runs devicectl device copy to ... but is given the path to a named
+		//   pipe FIFO file (basically a virtual file on the fs) to read from rather than the path
+		//   to the written bundle.js after it has been written. This allows devicectl to get
+		//   through all the "Acquired tunnel connection to device." etc. steps that waste time
+		//   before it actually copies the file
+		// - When THIS method is called, we simply write to the named pipe FIFO file and devicectl
+		//   will read it and copy it to the device
 
-		await this.uploadFilesCore([
-			{
-				deviceId: this.device.deviceInfo.identifier,
-				appId: deviceAppData.appIdentifier,
-				files: files,
-			},
-		]);
+		const baseCopyArgs = [
+			"devicectl",
+			"device",
+			"copy",
+			"to",
+			"--device",
+			this.device.deviceInfo.identifier,
+			"--user",
+			"root",
+			"--domain-type",
+			"appDataContainer",
+			"--domain-identifier",
+			"--timeout",
+			"5",
+			deviceAppData.appIdentifier,
+		]
+
+		await Promise.all(files.map(async f => {
+			console.log(`Copying ${f.destination}...`)
+			return new Promise<void>((res, rej) => {
+				const cp = spawn('/usr/bin/xcrun', [
+					...baseCopyArgs,
+					"--source",
+					f.source,
+					"--destination",
+					f.destination
+				])
+				cp.on('exit', code => {
+					if (code === 0) {
+						res()
+					} else {
+						rej(new Error(`Failed to copy file ${f.source} to ${f.destination} with code ${code}`))
+					}
+				})
+			})
+		}))
+
+		// await this.uploadFilesCore([
+		// 	{
+		// 		deviceId: this.device.deviceInfo.identifier,
+		// 		appId: deviceAppData.appIdentifier,
+		// 		files: files,
+		// 	},
+		// ]);
+		console.timeEnd('transferFiles')
 
 		return filesToUpload;
 	}

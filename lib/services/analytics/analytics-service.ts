@@ -56,6 +56,7 @@ export class AnalyticsService implements IAnalyticsService, IDisposable {
 	}
 
 	public async checkConsent(): Promise<void> {
+		return
 		if (await this.$analyticsSettingsService.canDoRequest()) {
 			const initialTrackFeatureUsageStatus = await this.getStatus(
 				this.$staticConfig.TRACK_FEATURE_USAGE_SETTING_NAME
@@ -139,6 +140,7 @@ export class AnalyticsService implements IAnalyticsService, IDisposable {
 	public async trackInGoogleAnalytics(
 		gaSettings: IGoogleAnalyticsData
 	): Promise<void> {
+		return
 		await this.initAnalyticsStatuses();
 
 		if (
@@ -154,6 +156,7 @@ export class AnalyticsService implements IAnalyticsService, IDisposable {
 	public async trackEventActionInGoogleAnalytics(
 		data: IEventActionData
 	): Promise<void> {
+		return
 		const device = data.device;
 		const platform = device ? device.deviceInfo.platform : data.platform;
 		const normalizedPlatform = platform
@@ -229,6 +232,7 @@ export class AnalyticsService implements IAnalyticsService, IDisposable {
 	private forcefullyTrackInGoogleAnalytics(
 		gaSettings: IGoogleAnalyticsData
 	): Promise<void> {
+		return
 		gaSettings.customDimensions = gaSettings.customDimensions || {};
 		gaSettings.customDimensions[GoogleAnalyticsCustomDimensions.client] =
 			this.$options.analyticsClient ||
@@ -462,6 +466,7 @@ export class AnalyticsService implements IAnalyticsService, IDisposable {
 	}
 
 	public trackException(exception: any, message: string): Promise<void> {
+		return
 		const data: IExceptionsTrackingInformation = {
 			type: TrackingTypes.Exception,
 			exception,

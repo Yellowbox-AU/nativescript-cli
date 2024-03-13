@@ -30,6 +30,10 @@ export class IOSDebuggerPortService implements IIOSDebuggerPortService {
 				10
 			);
 
+			// Basically this is just sitting here checking whether setData() has been called for
+			// the application we are interested in in a loop... Surely this would have been better
+			// implemented by returning the already set data if available else setting a deferred
+			// promise which is resolved by setData if present when it is called...
 			const interval = setInterval(() => {
 				const port = this.getPortByKey(key);
 				if (port || retryCount === 0) {
@@ -43,6 +47,7 @@ export class IOSDebuggerPortService implements IIOSDebuggerPortService {
 						clearInterval(interval);
 						reject(this.mapDebuggerPortData[key].error);
 					} else {
+						console.log(`retryCount = ${retryCount}: failed to get debugger port`)
 						retryCount--;
 					}
 				}

@@ -46,6 +46,8 @@ export class BuildController extends EventEmitter implements IBuildController {
 		this.$logger.info("Building project...");
 		const startTime = performance.now();
 
+		global.buildInProgress = true
+		
 		const platform = buildData.platform.toLowerCase();
 		const projectData = this.$projectDataService.getProjectData(
 			buildData.projectDir
@@ -109,6 +111,7 @@ export class BuildController extends EventEmitter implements IBuildController {
 
 		this.$logger.info("Project successfully built.");
 		this.$logger.info(`Build time: ${buildTime.toFixed(3)} s.`);
+		global.buildInProgress = false
 
 		const result = await this.$buildArtifactsService.getLatestAppPackagePath(
 			platformData,
@@ -158,10 +161,12 @@ export class BuildController extends EventEmitter implements IBuildController {
 			));
 
 		if (changesInfo.changesRequireBuild) {
+			console.log(`shouldBuild returning true: ` + 'changesInfo.changesRequireBuild'.yellow)
 			return true;
 		}
 
 		if (!this.$fs.exists(outputPath)) {
+			console.log(`shouldBuild returning true: ` + '!this.$fs.exists(outputPath)'.yellow)
 			return true;
 		}
 
@@ -173,6 +178,7 @@ export class BuildController extends EventEmitter implements IBuildController {
 			validBuildOutputData
 		);
 		if (packages.length === 0) {
+			console.log(`shouldBuild returning true: ` + 'packages.length === 0'.yellow)
 			return true;
 		}
 
@@ -184,10 +190,12 @@ export class BuildController extends EventEmitter implements IBuildController {
 			buildData
 		);
 		if (!prepareInfo || !buildInfo) {
+			console.log(`shouldBuild returning true: ` + '!prepareInfo || !buildInfo'.yellow)
 			return true;
 		}
 
 		if (buildData.clean) {
+			console.log(`shouldBuild returning true: ` + 'buildData.clean'.yellow)
 			return true;
 		}
 
@@ -195,7 +203,11 @@ export class BuildController extends EventEmitter implements IBuildController {
 			return false;
 		}
 
-		return prepareInfo.changesRequireBuildTime !== buildInfo.prepareTime;
+		if (prepareInfo.changesRequireBuildTime !== buildInfo.prepareTime) {
+			console.log(`shouldBuild returning true: ` + `prepareInfo.changesRequireBuildTime (${prepareInfo.changesRequireBuildTime}) !== buildInfo.prepareTime (${buildInfo.prepareTime})`.yellow)
+			return true
+		}
+		return false
 	}
 }
 injector.register("buildController", BuildController);

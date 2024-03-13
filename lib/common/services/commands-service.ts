@@ -60,28 +60,28 @@ export class CommandsService implements ICommandsService {
 		this.commands.push({ commandName, commandArguments });
 		const command = this.$injector.resolveCommand(commandName);
 		if (command) {
-			if (
-				!this.$staticConfig.disableAnalytics &&
-				!command.disableAnalytics &&
-				!this.$options.disableAnalytics
-			) {
-				const analyticsService =
-					this.$injector.resolve<IAnalyticsService>("analyticsService"); // This should be resolved here due to cyclic dependency
-				await analyticsService.checkConsent();
+			// if (
+			// 	!this.$staticConfig.disableAnalytics &&
+			// 	!command.disableAnalytics &&
+			// 	!this.$options.disableAnalytics
+			// ) {
+			// 	const analyticsService =
+			// 		this.$injector.resolve<IAnalyticsService>("analyticsService"); // This should be resolved here due to cyclic dependency
+			// 	await analyticsService.checkConsent();
 
-				const beautifiedCommandName = this.beautifyCommandName(
-					commandName
-				).replace(/\|/g, " ");
+			// 	const beautifiedCommandName = this.beautifyCommandName(
+			// 		commandName
+			// 	).replace(/\|/g, " ");
 
-				const googleAnalyticsPageData: IGoogleAnalyticsPageviewData = {
-					googleAnalyticsDataType: GoogleAnalyticsDataType.Page,
-					path: beautifiedCommandName,
-					title: beautifiedCommandName,
-				};
+			// 	const googleAnalyticsPageData: IGoogleAnalyticsPageviewData = {
+			// 		googleAnalyticsDataType: GoogleAnalyticsDataType.Page,
+			// 		path: beautifiedCommandName,
+			// 		title: beautifiedCommandName,
+			// 	};
 
-				await analyticsService.trackInGoogleAnalytics(googleAnalyticsPageData);
-				await this.$optionsTracker.trackOptions(this.$options);
-			}
+			// 	await analyticsService.trackInGoogleAnalytics(googleAnalyticsPageData);
+			// 	await this.$optionsTracker.trackOptions(this.$options);
+			// }
 
 			const shouldExecuteHooks =
 				!this.$staticConfig.disableCommandHooks &&

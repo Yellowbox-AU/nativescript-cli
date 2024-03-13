@@ -9,7 +9,7 @@
 		"experimentalDecorators": true,
 		"skipLibCheck": true,
 		"alwaysStrict": true,
-		"noUnusedLocals": true,
+		"noUnusedLocals": false,
 		"lib": ["ESNext"]
 	},
 	"include": ["lib/", "test/"]

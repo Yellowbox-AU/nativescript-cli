@@ -17,6 +17,8 @@ import {
 	IFileCleanupMessage,
 } from "./cleanup-process-definitions";
 import { Server, IChildProcess } from "../common/declarations";
+import chalk = require("chalk")
+import { SpawnNonZeroExitCodeError } from "../common/child-process"
 
 const pathToBootstrap = process.argv[2];
 if (!pathToBootstrap || !fs.existsSync(pathToBootstrap)) {
@@ -31,6 +33,13 @@ const fileLogService = injector.resolve<IFileLogService>(FileLogService, {
 	logFile,
 });
 fileLogService.logData({ message: "Initializing Cleanup process." });
+
+process.on('uncaughtException', function () {
+	console.error(chalk.red(`uncaught exception`, ...arguments))
+})
+process.on('unhandledRejection', function () {
+	console.error(chalk.red(`unhandledRejection`, ...arguments))
+})
 
 const commandsInfos: ISpawnCommandInfo[] = [];
 const filesToDelete: string[] = [];
@@ -100,7 +109,7 @@ const executeJSCleanup = async (jsCommand: IJSCommand) => {
 
 const executeCleanup = async () => {
 	const $childProcess = injector.resolve<IChildProcess>("childProcess");
-
+	console.log(`executeCleanup: got $childProcess. Processing ${requests.length} requests, ${jsCommands.length} jsCommands, ${commandsInfos.length} commandsInfos ${filesToDelete.length} filesToDelete...`)
 	for (const request of requests) {
 		await executeRequest(request);
 	}
@@ -111,22 +120,31 @@ const executeCleanup = async () => {
 
 	for (const commandInfo of commandsInfos) {
 		try {
+			console.log(`exec commandsInfo`, commandInfo)
 			fileLogService.logData({
 				message: `Start executing command: ${JSON.stringify(commandInfo)}`,
 			});
 
-			await $childProcess.trySpawnFromCloseEvent(
+			var interval = setInterval(() => console.log('waiting...'), 1000)
+			if (fs.existsSync(commandInfo.command) && process.platform) {
+				// Ensure the file is executable or this will never work and we will never know
+				$childProcess.exec(`chmod +x ${commandInfo.command}`)
+			}
+			const result = await $childProcess.trySpawnFromCloseEvent(
 				commandInfo.command,
 				commandInfo.args,
 				commandInfo.options || {},
 				{ throwError: true, timeout: commandInfo.timeout || 3000 }
 			);
+			console.log(`trySpawnFromCloseEvent(${commandInfo.command}, ...) gave result`, result)
 			fileLogService.logData({
 				message: `Successfully executed command: ${JSON.stringify(
 					commandInfo
 				)}`,
 			});
-		} catch (err) {
+		} catch (e) {
+			const err = e as SpawnNonZeroExitCodeError
+			console.error(chalk.red(`Failed to execute command ${commandInfo.command}`), err.result || err.message)
 			fileLogService.logData({
 				message: `Unable to execute command: ${JSON.stringify(
 					commandInfo
@@ -134,6 +152,8 @@ const executeCleanup = async () => {
 				type: FileLogMessageType.Error,
 			});
 		}
+		clearInterval(interval)
+		console.log(`returned from $childProcess.trySpawnFromCloseEvent`)
 	}
 
 	if (filesToDelete.length) {
@@ -157,6 +177,7 @@ const executeCleanup = async () => {
 };
 
 const addCleanupAction = (commandInfo: ISpawnCommandInfo): void => {
+	console.log(`Adding cleanup action`, commandInfo)
 	if (
 		_.some(commandsInfos, (currentCommandInfo) =>
 			_.isEqual(currentCommandInfo, commandInfo)
@@ -378,11 +399,13 @@ process.on("message", async (cleanupProcessMessage: ICleanupMessageBase) => {
 });
 
 process.on("disconnect", async () => {
+	console.log(`cleanup-process.ts: process.on "disconnect" occured`)
 	fileLogService.logData({
 		message: "cleanup-process received process.disconnect event",
 	});
 	await executeCleanup();
 	injector.dispose();
+	console.log(`cleanup-process.ts: returned from executeCleanup and injector.dispose, cleanup process will now exit...`)
 	process.exit();
 });
 

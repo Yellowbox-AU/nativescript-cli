@@ -99,6 +99,15 @@ export class WebpackCompilerService
 
 				childProcess.on("message", (message: string | IWebpackEmitMessage) => {
 					this.$logger.trace("Message from webpack", message);
+					// TODO: The issue where the CLI syncs only 4 files seems to be caused by
+					// webpack emitting a "file change detected, starting incremental compilation"
+					// between when the INITIAL build finishes and when the CLI zips the files from
+					// the initial build. The file change detected triggers webpack to start another
+					// compilation, during which the first thing it does is to run the
+					// CleanWebpackPlugin, which deletes everything in assets, fonts, all jpgs and
+					// all pngs in platforms/ios/... thus leaving only the 4 .js files from the
+					// initial build (TODO: figure out if in this handler code below we can delay or
+					// cancel this)
 
 					// if we are on webpack5 - we handle HMR in a  slightly different way
 					if (
@@ -132,9 +141,13 @@ export class WebpackCompilerService
 					if (message === "Webpack compilation complete.") {
 						this.$logger.info("Webpack build done!");
 						resolve(childProcess);
+					} else if (typeof message === 'string') {
+						console.warn(`Unexpected/unhandled webpack string message: "${message}"`.red)
+						return
 					}
 
 					message = message as IWebpackEmitMessage;
+					console.log(`cli received "${message}" message.emittedFiles =`, message.emittedFiles)
 					if (message.emittedFiles) {
 						if (isFirstWebpackWatchCompilation) {
 							isFirstWebpackWatchCompilation = false;
@@ -184,21 +197,17 @@ export class WebpackCompilerService
 							),
 							hmrData: {
 								hash: result.hash,
+								previousHash,
 								fallbackFiles,
 							},
 							platform: platformData.platformNameLowerCase,
 						};
 
 						this.$logger.trace("Generated data from webpack message:", data);
-
-						// the hash of the compilation is the same as the previous one and there are only hot updates produced
-						if (data.hasOnlyHotUpdateFiles && previousHash === message.hash) {
-							return;
-						}
-
-						if (data.files.length) {
-							this.emit(WEBPACK_COMPILATION_COMPLETE, data);
-						}
+						// Modification in lib\controllers\run-controller.ts line ~327 will ensure
+						// that if no files were changed the app will be completely restarted if run
+						// in HMR mode
+						this.emit(WEBPACK_COMPILATION_COMPLETE, data);
 					}
 				});
 
@@ -309,6 +318,7 @@ export class WebpackCompilerService
 		projectData: IProjectData,
 		prepareData: IPrepareData
 	): Promise<child_process.ChildProcess> {
+
 		if (!this.$fs.exists(projectData.webpackConfigPath)) {
 			this.$errors.fail(
 				`The webpack configuration file ${projectData.webpackConfigPath} does not exist. Ensure the file exists, or update the path in ${CONFIG_FILE_NAME_DISPLAY}.`
@@ -345,9 +355,24 @@ export class WebpackCompilerService
 			...envParams,
 		].filter(Boolean);
 
+		const psECommand = 'ps -e | grep "[w]ebpack"'
+		let psEOutput
+		if ((psEOutput = child_process.execSync(`${psECommand} || exit 0`).toString()).includes(`--config=${projectData.webpackConfigPath}`) && psEOutput.includes(`--env.${platformData.platformNameLowerCase}`)) {
+			console.error(`Webpack process for the application already running. Output from ${psECommand}:\n${psEOutput}`.red)
+			console.warn(`Killing webpack processes...`.yellow)
+			const pids = psEOutput.match(/^ *\d+/gm).map(m => +m)
+			pids.forEach(pid => child_process.execSync(`kill -KILL ${pid}`).toString())
+			throw new Error(`Webpack process for this project was already running. Attempted to kill process id(s): ${pids}. Try running the command again or try killing those processes forcefully with "sudo kill -KILL" if issue recurrs`)
+		}
+
 		if (prepareData.watch) {
 			args.push("--watch");
 		}
+
+		// Make sure the cleanup process is fully launched and ready before starting webpack,
+		// because if we $errors.fail() between when webpack is started and addKillProcess is called
+		// (e.g. "device could not be found") then the webpack process will continue running.
+		await this.$cleanupService.getCleanupProcess()
 
 		const stdio = prepareData.watch ? ["ipc"] : "inherit";
 		const options: { [key: string]: any } = {
@@ -610,7 +635,7 @@ export class WebpackCompilerService
 		})();
 
 		if (!files.length) {
-			// ignore compilations if no new files are emitted
+			console.warn(`webpack-compiler-service.ts handleHMRMessage(): No new files emitted, returning with no action...`.red)
 			return;
 		}
 

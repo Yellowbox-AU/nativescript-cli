@@ -282,6 +282,12 @@ declare global {
 	}
 
 	interface IPlatformLiveSyncService {
+		/**
+		 * Perform liveSync:
+		 * - **On iOS**: Create a zip archive containing all the project output files, transfers it
+		 *   to the device and instructs the device to decompress the archive.
+		 * - **On Android**: Transfer the files directly to the device using individual paths.
+		 */
 		fullSync(syncInfo: IFullSyncInfo): Promise<ILiveSyncResultInfo>;
 		liveSyncWatchAction(
 			device: Mobile.IDevice,

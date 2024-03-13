@@ -58,6 +58,7 @@ export class XcodebuildService implements IXcodebuildService {
 			projectData,
 			buildConfig
 		);
+		debugger
 		await this.$xcodebuildCommandService.executeCommand(args, {
 			cwd: platformData.projectRoot,
 			stdio: buildConfig && buildConfig.buildOutputStdio,
